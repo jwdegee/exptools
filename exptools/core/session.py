@@ -18,6 +18,7 @@ import datetime
 import os
 import pickle as pkl
 import pandas as pd
+import glob
 
 import pyaudio, wave
 import numpy as np
@@ -149,28 +150,48 @@ class Session(object):
         opd = pd.DataFrame.from_records(self.outputDict['parameterArray'])
         opd.to_csv(path_or_buf=self.output_file + '.tsv', sep='\t', encoding='utf-8')
     
-    def play_sound(self, sound_index = '0'):
+    def setup_sound_system(self, directory):
+        """initialize pyaudio backend, and create dictionary of sounds."""
+        self.pyaudio = pyaudio.PyAudio()
+        self.sound_files = glob.glob(os.path.join(directory, '*.wav'))
+        self.sounds = {}
+        for sf in self.sound_files:
+            self.read_sound_file(file_name = sf)
+
+    def read_sound_file(self, file_name, sound_name = None):
+        """Read sound file from file_name, and append to self.sounds with name as key"""
+        if sound_name == None:
+            sound_name = os.path.splitext(os.path.split(file_name)[-1])[0]
+        wf = wave.open(file_name, 'rb')
+        self.sounds.update({sound_name: wf})
+
+    def play_sound(self, sound_index='0'):
         """docstring for play_sound"""
         if type(sound_index) == int:
             sound_index = str(sound_index)
-        # assuming 44100 Hz, mono channel np.int16 format for the sounds
-        stream_data = self.sounds[sound_index]
         
-        self.frame_counter = 0
-        def callback(in_data, frame_count, time_info, status):
-            data = stream_data[self.frame_counter:self.frame_counter+frame_count]
-            self.frame_counter += frame_count
-            return (data, pyaudio.paContinue)
+        CHUNK = 1024
 
-        # open stream using callback (3)
-        stream = self.pyaudio.open(format=pyaudio.paInt16,
-                        channels=1,
-                        rate=44100,
-                        output=True,
-                        stream_callback=callback)
+        wf = self.sounds[sound_index]
+        
+        stream = self.pyaudio.open(format=self.pyaudio.get_format_from_width(wf.getsampwidth()),
+                channels=wf.getnchannels(),
+                rate=wf.getframerate(),
+                output=True)
+        
+        # read data
+        data = wf.readframes(CHUNK)
 
-        stream.start_stream()
-        # stream.write(stream_data)
+        # play stream (3)
+        while len(data) > 0:
+            stream.write(data)
+            data = wf.readframes(CHUNK)
+
+            print len(data)
+
+        # stop stream (4)
+        stream.stop_stream()
+        # stream.close()
 
     def play_np_sound(self, sound_array):
         # assuming 44100 Hz, mono channel np.int16 format for the sounds
@@ -690,7 +711,3 @@ def test_MRISession_simulation():
     logging.console.setLevel(logging.DEBUG)
     logging.info('Current TR: %s\n\rTime last TR: %s' % (session.current_tr, session.time_of_last_tr, ))
     assert(session.current_tr > 0) 
-
-
-
-
